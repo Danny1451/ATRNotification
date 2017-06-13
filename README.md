@@ -217,3 +217,99 @@ MP4 文件
 - 注意文件下载的位置的存储管理，及时的清空。
 - 注意如果要用第三方的库的话，extison 要单独引用和编译一份，因为和 app 一样他们其实是独立进程的。
 - 注意户的网络情况，进行判断是否要下载资源，不然用户的流量就给你这么咔咔咔全耗完了。
+
+# iOS 10 来点不一样的推送 (2) - 语言提示
+
+> 转自我的 Blog: [Danny's Dream]( http://danny-lau.com/2017/06/13/ios-10-notification-2/)
+
+
+接着上篇[文章](https://juejin.im/post/591e9fe1a22b9d00585b2b60)，在一个交流群里有个小伙伴问，怎么实现支付宝类似收到钱之后的语音播放效果。
+
+结合着之前对推送的研究，想到了两种实现方案：
+- 1.在 notification 的 extension 中将收到的内容播放出来。
+- 2.将文字转换成语音文件，保存在本地，然后替换为播放的提示音。
+
+## 直接播放
+
+#### AVFoundation
+其实苹果有提供原生的文字转语音的功能，在 AVFoundation 框架中。简单的使用方法如下：
+
+````
+self.speechSynthesizer = [[AVSpeechSynthesizer alloc] init];
+AVSpeechUtterance *utterance = [AVSpeechUtterance speechUtteranceWithString:@“收到人民币1000000"];
+
+AVSpeechSynthesisVoice *voiceType = [AVSpeechSynthesisVoice voiceWithLanguage:@"en-US"];
+utterance.voice = voiceType;
+//设置语速
+utterance.rate *= 0.5;
+//设置音量
+utterance.volume = 0.6;
+
+[self.speechSynthesizer speakUtterance:utterance];
+
+````
+看上去很简单的样子，让我们赶紧放进 extension 中试一下。
+在之前的基础上我们做一些修改，将播放操作封装成一个播放的方法。
+
+````
+
+- (void)readContent:(NSString*)str{
+//AVSpeechUtterance: 可以假想成要说的一段话
+AVSpeechUtterance * aVSpeechUtterance = [[AVSpeechUtterance alloc] initWithString:str];
+
+aVSpeechUtterance.rate = AVSpeechUtteranceDefaultSpeechRate;
+
+//AVSpeechSynthesisVoice: 可以假想成人的声音
+aVSpeechUtterance.voice =[AVSpeechSynthesisVoice voiceWithLanguage:@"zh-CN"];
+
+//发音
+[self.aVSpeechSynthesizer speakUtterance:aVSpeechUtterance];
+
+}
+
+````
+#### target 配置
+在收到推送的时候，将推送的 body 读出来，想的还是美滋滋的。
+把 demo 运行起来的时候，发现收到推送后并没有声音。
+通过查阅资料，发现类似于这样的后台播放音乐，是需要一个 Background modes 的权限的，就是下面的第一个 Mode。【不过好像有人说，勾选了该权限可能会被拒】
+
+![](https://dn-mhke0kuv.qbox.me/a22e6367c0a2844adeeb.png)
+
+#### 音效不完整
+然后我们再一次的尝试，这次可以播放出声音了，但是有个问题，就是声音播放到一半就停了，然后紧跟着的是推送的通知音。初步推测是播放其实也是在另一个线程中的进行的，当结束 extension 的操作弹出通知时，播放语音仍在进行中，会导致两个冲突，而系统通知的优先级更高，所以原来的语音会被拦截。
+这一步考虑的解决方法是，在 extension 中做一个延迟的操作，首先想到的是用 GCD 。
+````
+dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)),
+dispatch_get_main_queue(), ^{
+
+self.contentHandler(self.bestAttemptContent);
+
+});
+````
+假设播放的语音是 5秒，在调用播放 5 秒之后，再触发处理完通知的回调，这样虽然是解决了上述的问题，但是似乎不够的优雅，无法控制如果语音更长的情况。
+
+#### 自动结束
+
+翻阅了文档，看看有没有可以收到播放完成的事件的地方。发现 AVSpeechSynthesizer 有一个 AVSpeechSynthesizerDelegate，将当前的 NotificationService 实现 AVSpeechSynthesizerDelegate，这样就能在下面的回调中结束播放成功时间，这样就能动态的控制通知展示的时间的。
+````
+
+- (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer didFinishSpeechUtterance:(AVSpeechUtterance *)utterance;{
+
+NSLog(@"阅读完毕");
+self.contentHandler(self.bestAttemptContent);
+}
+
+````
+这样就基本实现了我们想要的效果了！
+由于推送的特殊性，可以实现后台唤醒，所以当 app 运行在后台，或者 app 被 kill 了，仍然可以唤醒并播放语言！😃
+
+### 合成
+
+考虑的是采用[科大讯飞](http://doc.xfyun.cn/msc_ios/302722)的语音合成 SDK，在 extension 中进行集成，然后转换成语音文件保存至本地，同时把推送的提示语音设置为该音频文件。
+由于科大讯飞注册太麻烦了，就没尝试（跑。。）。不过感觉理论上应该可以实现该功能，主要有问题的地方可能就是转换之后的语言文件是否能作为提示音的问题了。
+
+
+## 总结
+
+基本的功能已经实现，最新的代码已经提交到原先的 [demo](https://github.com/Danny1451/PushTest.git) 中啦，但是需要注意的是 demo 不带证书，可以把相关代码拷到你自己的项目中去尝试，[演示视频](https://github.com/Danny1451/PushTest/blob/master/Demo.MOV)也传到 GitHub 中了。
+(如果感到有用的加个✨吧 溜了 溜了）

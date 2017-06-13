@@ -30,7 +30,7 @@
     
     UNMutableNotificationContent* content = [[UNMutableNotificationContent alloc] init];
     content.title = @"Opps!";
-    content.body = @"Surprise ! Mother Fucker ! 😎";
+    content.body = @"没想到吧，儿子";
     content.sound = [UNNotificationSound defaultSound];
     
     NSString *imageUrl = @"https://raw.githubusercontent.com/Danny1451/BlogPic/master/face/8.jpg";

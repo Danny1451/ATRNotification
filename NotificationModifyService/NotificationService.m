@@ -14,6 +14,9 @@
 @property (nonatomic, strong) UNMutableNotificationContent *bestAttemptContent;
 @property (nonatomic,strong) NSURLSessionDownloadTask *downLoadTask;
 
+//负责播放
+@property (nonatomic, strong) AVSpeechSynthesizer *aVSpeechSynthesizer;
+
 @end
 
 @implementation NotificationService
@@ -25,6 +28,11 @@
     // Modify the notification content here...
     // self.bestAttemptContent.title = [NSString stringWithFormat:@"%@ [modified]", self.bestAttemptContent.title];
     
+    // read content
+    [self readContent:self.bestAttemptContent.body];
+    
+    
+    /** download images
     NSString *url = request.content.userInfo[@"attach"];
     NSURL *nsurl = [NSURL URLWithString:url];
     
@@ -47,15 +55,51 @@
     }];
     
     [self.downLoadTask resume];
+     **/
 }
+
+- (void)readContent:(NSString*)str{
+    //AVSpeechUtterance: 可以假想成要说的一段话
+    AVSpeechUtterance * aVSpeechUtterance = [[AVSpeechUtterance alloc] initWithString:str];
+    
+    aVSpeechUtterance.rate = AVSpeechUtteranceDefaultSpeechRate;
+    
+    //AVSpeechSynthesisVoice: 可以假想成人的声音
+    aVSpeechUtterance.voice =[AVSpeechSynthesisVoice voiceWithLanguage:@"zh-CN"];
+    
+    //发音
+    [self.aVSpeechSynthesizer speakUtterance:aVSpeechUtterance];
+    
+}
+- (void)stopRead{
+    
+    [self.aVSpeechSynthesizer stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
+    
+}
+
+
+- (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer didFinishSpeechUtterance:(AVSpeechUtterance *)utterance;{
+    
+    NSLog(@"阅读完毕");
+    self.contentHandler(self.bestAttemptContent);
+}
+
 
 - (void)serviceExtensionTimeWillExpire {
     // Called just before the extension will be terminated by the system.
     // Use this as an opportunity to deliver your "best attempt" at modified content, otherwise the original push payload will be used.
+     [self stopRead];
     NSLog(@"cancel ");
     
     [self.downLoadTask cancel];
     self.contentHandler(self.bestAttemptContent);
 }
 
+- (AVSpeechSynthesizer *)aVSpeechSynthesizer{
+    if (!_aVSpeechSynthesizer) {
+        _aVSpeechSynthesizer = [[AVSpeechSynthesizer alloc] init];
+        _aVSpeechSynthesizer.delegate = self;
+    }
+    return _aVSpeechSynthesizer;
+}
 @end
